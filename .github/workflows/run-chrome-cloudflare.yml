@@ -2,21 +2,19 @@ name: Run Chrome with noVNC and Cloudflare Tunnel
 
 on:
   workflow_dispatch:
+    inputs:
+      vnc_password:
+        description: 'رمز عبور دلخواه برای VNC (مثلا 8 کاراکتر)'
+        required: true
+        default: 'MyPass12'
 
 jobs:
   run-chrome:
     runs-on: ubuntu-latest
-    timeout-minutes: 360   # حداکثر مجاز گیت‌هاب (۶ ساعت)
+    timeout-minutes: 360   # ۶ ساعت
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Validate VNC_PASSWORD secret
-        run: |
-          if [ -z "${{ secrets.VNC_PASSWORD }}" ]; then
-            echo "::error::لطفاً Secret با نام VNC_PASSWORD را تعریف کنید."
-            exit 1
-          fi
 
       - name: Start Xvfb virtual display
         run: |
@@ -26,7 +24,7 @@ jobs:
       - name: Setup VNC password
         run: |
           mkdir -p ~/.vnc
-          x11vnc -storepasswd "${{ secrets.VNC_PASSWORD }}" ~/.vnc/passwd
+          x11vnc -storepasswd "${{ github.event.inputs.vnc_password }}" ~/.vnc/passwd
           chmod 600 ~/.vnc/passwd
 
       - name: Start x11vnc with password
@@ -52,9 +50,7 @@ jobs:
           URL=$(grep -o 'https://[^ ]*\.trycloudflare\.com' cloudflared.log | head -1)
           echo "=================================================="
           echo "🌐 URL:      $URL"
-          echo "🔒 Password: همان مقدار Secret با نام VNC_PASSWORD"
+          echo "🔒 Password: ${{ github.event.inputs.vnc_password }}"
           echo "⏱️  مدت اجرا: 6 ساعت"
-          echo "=================================================="
-          echo "نکته: این لینک در لاگ عمومی دیده می‌شود، اما بدون رمز عبور قابل استفاده نیست."
           echo "=================================================="
           sleep 21600
