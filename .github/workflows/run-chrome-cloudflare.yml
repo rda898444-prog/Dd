@@ -1,0 +1,60 @@
+name: Run Chrome with noVNC and Cloudflare Tunnel
+
+on:
+  workflow_dispatch:
+
+jobs:
+  run-chrome:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360   # حداکثر مجاز گیت‌هاب (۶ ساعت)
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate VNC_PASSWORD secret
+        run: |
+          if [ -z "${{ secrets.VNC_PASSWORD }}" ]; then
+            echo "::error::لطفاً Secret با نام VNC_PASSWORD را تعریف کنید."
+            exit 1
+          fi
+
+      - name: Start Xvfb virtual display
+        run: |
+          Xvfb :99 -screen 0 1280x1024x24 &
+          echo "DISPLAY=:99" >> $GITHUB_ENV
+
+      - name: Setup VNC password
+        run: |
+          mkdir -p ~/.vnc
+          x11vnc -storepasswd "${{ secrets.VNC_PASSWORD }}" ~/.vnc/passwd
+          chmod 600 ~/.vnc/passwd
+
+      - name: Start x11vnc with password
+        run: |
+          x11vnc -display :99 -forever -shared -rfbauth ~/.vnc/passwd -rfbport 5900 -quiet &
+          sleep 3
+
+      - name: Start noVNC (websockify)
+        run: |
+          websockify --web /usr/share/novnc 6080 localhost:5900 &
+          sleep 3
+
+      - name: Launch Chromium in the virtual display
+        run: |
+          export DISPLAY=:99
+          chromium-browser --no-sandbox --disable-gpu &
+          echo "Chromium launched"
+
+      - name: Start Cloudflare Quick Tunnel (6 hours)
+        run: |
+          cloudflared tunnel --url http://localhost:6080 --logfile cloudflared.log &
+          sleep 15
+          URL=$(grep -o 'https://[^ ]*\.trycloudflare\.com' cloudflared.log | head -1)
+          echo "=================================================="
+          echo "🌐 URL:      $URL"
+          echo "🔒 Password: همان مقدار Secret با نام VNC_PASSWORD"
+          echo "⏱️  مدت اجرا: 6 ساعت"
+          echo "=================================================="
+          echo "نکته: این لینک در لاگ عمومی دیده می‌شود، اما بدون رمز عبور قابل استفاده نیست."
+          echo "=================================================="
+          sleep 21600
