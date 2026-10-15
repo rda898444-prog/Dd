@@ -4,53 +4,67 @@ on:
   workflow_dispatch:
     inputs:
       vnc_password:
-        description: 'رمز عبور دلخواه برای VNC (مثلا 8 کاراکتر)'
+        description: 'رمز عبور دلخواه برای VNC (حداقل 6 کاراکتر، حداکثر 8 کاراکتر)'
         required: true
         default: 'MyPass12'
 
 jobs:
   run-chrome:
     runs-on: ubuntu-latest
-    timeout-minutes: 360   # ۶ ساعت
+    timeout-minutes: 360   # حداکثر زمان مجاز گیت‌هاب (۶ ساعت)
+    
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Start Xvfb virtual display
         run: |
-          Xvfb :99 -screen 0 1280x1024x24 &
+          # انتقال لاگ‌ها به /dev/null تا مرحله هنگ نکنه
+          Xvfb :99 -screen 0 1280x1024x24 > /dev/null 2>&1 &
+          sleep 2
           echo "DISPLAY=:99" >> $GITHUB_ENV
 
       - name: Setup VNC password
         run: |
           mkdir -p ~/.vnc
+          # ساخت فایل رمز عبور با رمزی که کاربر وارد کرده
           x11vnc -storepasswd "${{ github.event.inputs.vnc_password }}" ~/.vnc/passwd
           chmod 600 ~/.vnc/passwd
 
       - name: Start x11vnc with password
         run: |
-          x11vnc -display :99 -forever -shared -rfbauth ~/.vnc/passwd -rfbport 5900 -quiet &
-          sleep 3
+          x11vnc -display :99 -forever -shared -rfbauth ~/.vnc/passwd -rfbport 5900 -quiet > /dev/null 2>&1 &
+          sleep 2
 
       - name: Start noVNC (websockify)
         run: |
-          websockify --web /usr/share/novnc 6080 localhost:5900 &
-          sleep 3
+          websockify --web /usr/share/novnc 6080 localhost:5900 > /dev/null 2>&1 &
+          sleep 2
 
       - name: Launch Chromium in the virtual display
         run: |
           export DISPLAY=:99
-          chromium-browser --no-sandbox --disable-gpu &
-          echo "Chromium launched"
+          # اجرای کروم در پس‌زمینه
+          chromium-browser --no-sandbox --disable-gpu --disable-dev-shm-usage > /dev/null 2>&1 &
+          echo "Chromium launched in background"
+          sleep 2
 
       - name: Start Cloudflare Quick Tunnel (6 hours)
         run: |
-          cloudflared tunnel --url http://localhost:6080 --logfile cloudflared.log &
+          # اجرای تونل کلادفلر در پس‌زمینه و ذخیره لاگ آن در یک فایل
+          cloudflared tunnel --url http://localhost:6080 --logfile cloudflared.log > /dev/null 2>&1 &
           sleep 15
+          
+          # استخراج لینک عمومی از فایل لاگ
           URL=$(grep -o 'https://[^ ]*\.trycloudflare\.com' cloudflared.log | head -1)
+          
           echo "=================================================="
           echo "🌐 URL:      $URL"
           echo "🔒 Password: ${{ github.event.inputs.vnc_password }}"
           echo "⏱️  مدت اجرا: 6 ساعت"
           echo "=================================================="
+          echo "نکته: لینک بالا را در مرورگر باز کنید و رمز عبور را وارد کنید."
+          echo "=================================================="
+          
+          # نگه داشتن ورک‌فلو به مدت 6 ساعت (21600 ثانیه) زنده
           sleep 21600
