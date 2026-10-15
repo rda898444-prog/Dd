@@ -34,16 +34,38 @@ jobs:
           tar -xzf bore-v0.5.0-x86_64-unknown-linux-musl.tar.gz
           chmod +x bore
 
-      # 2. نصب وابستگی‌ها و دانلود مرورگر Min
+      # 2. نصب وابستگی‌ها و دانلود داینامیک Min
       - name: Install dependencies and download Min
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb x11vnc wget
-          # دانلود آخرین نسخه Min (نسخه دبیان)
-          wget -q https://github.com/minbrowser/min/releases/latest/download/min_1.35.7_amd64.deb -O /tmp/min.deb
-          sudo dpkg -i /tmp/min.deb || sudo apt-get install -f -y
+          sudo apt-get install -y xvfb x11vnc curl jq
 
-      # 3. Xvfb با رزولوشن و عمق رنگ کمتر (ترافیک VNC کمتر)
+          # پیدا کردن آخرین لینک دانلود فایل .deb از گیت‌هاب API
+          echo "🔍 Fetching latest Min release URL..."
+          DEB_URL=$(curl -s https://api.github.com/repos/minbrowser/min/releases/latest | jq -r '.assets[] | select(.name | endswith("_amd64.deb")) | .browser_download_url' | head -1)
+          
+          if [ -z "$DEB_URL" ] || [ "$DEB_URL" = "null" ]; then
+            echo "❌ Could not find a .deb asset. Trying alternative filename..."
+            DEB_URL=$(curl -s https://api.github.com/repos/minbrowser/min/releases/latest | jq -r '.assets[] | select(.name | endswith("amd64.deb")) | .browser_download_url' | head -1)
+          fi
+          
+          echo "✅ Found URL: $DEB_URL"
+          wget -q "$DEB_URL" -O /tmp/min.deb
+          
+          # بررسی حجم فایل دانلودشده
+          ls -lh /tmp/min.deb
+          
+          # نصب با رفع خودکار وابستگی‌ها
+          sudo apt-get install -y /tmp/min.deb || {
+            sudo dpkg -i /tmp/min.deb || true
+            sudo apt-get install -f -y
+          }
+          
+          # تست نصب
+          which min || echo "⚠️ min binary not found in PATH"
+          ls -la /usr/bin/min 2>/dev/null || ls -la /opt/min* 2>/dev/null || true
+
+      # 3. Xvfb با رزولوشن و عمق رنگ کمتر
       - name: Start Xvfb virtual display
         run: |
           Xvfb :99 -screen 0 1024x768x16 > /dev/null 2>&1 &
@@ -56,7 +78,7 @@ jobs:
           x11vnc -storepasswd "${{ github.event.inputs.vnc_password }}" $HOME/.vnc/passwd
           chmod 600 $HOME/.vnc/passwd
 
-      # 4. x11vnc با تنظیمات بهینه برای سرعت
+      # 4. x11vnc با تنظیمات بهینه
       - name: Start x11vnc with optimized settings
         run: |
           x11vnc -display :99 \
@@ -73,12 +95,16 @@ jobs:
             -quiet > /dev/null 2>&1 &
           sleep 3
 
-      # 5. اجرای Min
+      # 5. اجرای Min با مسیر کامل (چون ممکنه توی PATH نباشه)
       - name: Launch Min
         run: |
           export DISPLAY=:99
-          min --no-sandbox --disable-gpu > /dev/null 2>&1 &
+          # تلاش برای پیدا کردن مسیر min
+          MIN_BIN=$(which min || echo "/opt/Min/min")
+          echo "🚀 Launching: $MIN_BIN"
+          $MIN_BIN --no-sandbox --disable-gpu > /tmp/min.log 2>&1 &
           sleep 3
+          cat /tmp/min.log || true
 
       # 6. تونل bore
       - name: Start bore tunnel
