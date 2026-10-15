@@ -1,15 +1,15 @@
-name: Run Falkon with noVNC and Cloudflare Tunnel
+name: Run Falkon with RealVNC via bore Tunnel
 
 on:
   workflow_dispatch:
     inputs:
       vnc_password:
-        description: 'رمز عبور دلخواه برای VNC (حداقل 6 کاراکتر، حداکثر 8 کاراکتر)'
+        description: 'رمز عبور برای VNC (حداقل 6 کاراکتر، حداکثر 8 کاراکتر)'
         required: true
         default: 'MyPass12'
 
 jobs:
-  run-falkon:
+  run-falkon-vnc:
     runs-on: ubuntu-latest
     timeout-minutes: 360   # ۶ ساعت
     
@@ -17,26 +17,27 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 1. بخش کش کردن cloudflared (دقیقا مثل قبل)
-      - name: Cache cloudflared
-        id: cache-cloudflared
+      # 1. کش کردن bore برای سرعت بیشتر (اختیاری)
+      - name: Cache bore
+        id: cache-bore
         uses: actions/cache@v4
         with:
-          path: ~/cloudflared
-          key: ${{ runner.os }}-cloudflared-latest
+          path: ~/bore
+          key: ${{ runner.os }}-bore-v0.5.0
 
-      - name: Download cloudflared if not cached
-        if: steps.cache-cloudflared.outputs.cache-hit != 'true'
+      - name: Download bore if not cached
+        if: steps.cache-bore.outputs.cache-hit != 'true'
         run: |
-          mkdir -p ~/cloudflared
-          wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O ~/cloudflared/cloudflared
-          chmod +x ~/cloudflared/cloudflared
+          mkdir -p ~/bore
+          wget -q https://github.com/ekzhang/bore/releases/download/v0.5.0/bore-v0.5.0-x86_64-unknown-linux-musl.tar.gz -O /tmp/bore.tar.gz
+          tar -xzf /tmp/bore.tar.gz -C ~/bore
+          chmod +x ~/bore/bore
 
-      # 2. نصب وابستگی‌ها (به جای chromium-browser از falkon استفاده می‌کنیم)
+      # 2. نصب وابستگی‌های سیستمی
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb x11vnc novnc websockify falkon
+          sudo apt-get install -y xvfb x11vnc falkon
 
       # 3. راه‌اندازی محیط گرافیکی
       - name: Start Xvfb virtual display
@@ -51,37 +52,35 @@ jobs:
           x11vnc -storepasswd "${{ github.event.inputs.vnc_password }}" ~/.vnc/passwd
           chmod 600 ~/.vnc/passwd
 
-      - name: Start x11vnc with password
+      - name: Start x11vnc (listening on 0.0.0.0)
         run: |
-          x11vnc -display :99 -forever -shared -rfbauth ~/.vnc/passwd -rfbport 5900 -quiet > /dev/null 2>&1 &
+          # -listen 0.0.0.0 برای اینکه bore بتواند به آن وصل شود
+          x11vnc -display :99 -forever -shared -rfbauth ~/.vnc/passwd -rfbport 5900 -listen 0.0.0.0 -quiet > /dev/null 2>&1 &
           sleep 2
 
-      - name: Start noVNC (websockify)
-        run: |
-          websockify --web /usr/share/novnc 6080 localhost:5900 > /dev/null 2>&1 &
-          sleep 2
-
-      # 4. اجرای مرورگر سبک Falkon به جای کرومیوم
+      # 4. اجرای مرورگر سبک Falkon
       - name: Launch Falkon in the virtual display
         run: |
           export DISPLAY=:99
           falkon --no-sandbox --disable-gpu --disable-dev-shm-usage > /dev/null 2>&1 &
           sleep 3
 
-      # 5. تونل و چاپ لینک مستقیم
-      - name: Start Cloudflare Quick Tunnel (6 hours)
+      # 5. تونل TCP با bore و چاپ آدرس اتصال
+      - name: Start bore tunnel for VNC (6 hours)
         run: |
-          ~/cloudflared/cloudflared tunnel --url http://localhost:6080 --logfile cloudflared.log > /dev/null 2>&1 &
-          sleep 15
+          ~/bore/bore local 5900 --to bore.pub > bore.log 2>&1 &
+          sleep 5
           
-          URL=$(grep -o 'https://[^ ]*\.trycloudflare\.com' cloudflared.log | head -1)
+          # استخراج آدرس عمومی از لاگ bore (فرمت: bore.pub:xxxxx)
+          ADDR=$(grep -oP 'bore\.pub:\d+' bore.log | head -1)
           
           echo "=================================================="
-          echo "🌐 لینک اصلی:      $URL"
-          echo "🔒 رمز عبور:        ${{ github.event.inputs.vnc_password }}"
+          echo "🔗 آدرس اتصال برای RealVNC Viewer:"
+          echo "   Address: ${ADDR%:*}"
+          echo "   Port:    ${ADDR#*:}"
+          echo "🔒 رمز عبور: ${{ github.event.inputs.vnc_password }}"
           echo "=================================================="
-          echo "👉 لطفاً این لینک را باز کنید (دقت کنید که vnc_lite.html به آخر آن اضافه شده است):"
-          echo "$URL/vnc_lite.html"
+          echo "👉 در RealVNC Viewer آدرس بالا را وارد کنید و رمز عبور را بزنید."
           echo "=================================================="
           
           sleep 21600
