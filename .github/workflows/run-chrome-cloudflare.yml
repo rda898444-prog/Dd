@@ -39,7 +39,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb x11vnc curl jq
-
+          
           # پیدا کردن آخرین لینک دانلود فایل .deb از گیت‌هاب API
           echo "🔍 Fetching latest Min release URL..."
           DEB_URL=$(curl -s https://api.github.com/repos/minbrowser/min/releases/latest | jq -r '.assets[] | select(.name | endswith("_amd64.deb")) | .browser_download_url' | head -1)
@@ -78,7 +78,7 @@ jobs:
           x11vnc -storepasswd "${{ github.event.inputs.vnc_password }}" $HOME/.vnc/passwd
           chmod 600 $HOME/.vnc/passwd
 
-      # 4. x11vnc با تنظیمات بهینه
+      # 4. x11vnc بدون ncache (مشکل صفحه سیاه رو حل میکنه)
       - name: Start x11vnc with optimized settings
         run: |
           x11vnc -display :99 \
@@ -86,8 +86,6 @@ jobs:
             -rfbauth $HOME/.vnc/passwd \
             -rfbport 5900 \
             -listen 0.0.0.0 \
-            -ncache 10 \
-            -ncache_cr \
             -wait 15 \
             -defer 15 \
             -speeds lan \
@@ -95,7 +93,7 @@ jobs:
             -quiet > /dev/null 2>&1 &
           sleep 3
 
-      # 5. اجرای Min با مسیر کامل (چون ممکنه توی PATH نباشه)
+      # 5. اجرای Min
       - name: Launch Min
         run: |
           export DISPLAY=:99
