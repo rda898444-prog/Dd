@@ -11,15 +11,24 @@ on:
 jobs:
   run-chrome:
     runs-on: ubuntu-latest
-    timeout-minutes: 360   # حداکثر زمان مجاز گیت‌هاب (۶ ساعت)
+    timeout-minutes: 360   # ۶ ساعت
     
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install all dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb x11vnc novnc websockify chromium-browser wget
+          # دانلود و نصب cloudflared به صورت دستی (چون بسته deb ممکنه وابستگی کم داشته باشه)
+          wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+          chmod +x cloudflared-linux-amd64
+          sudo mv cloudflared-linux-amd64 /usr/local/bin/cloudflared
+          cloudflared --version
+
       - name: Start Xvfb virtual display
         run: |
-          # انتقال لاگ‌ها به /dev/null تا مرحله هنگ نکنه
           Xvfb :99 -screen 0 1280x1024x24 > /dev/null 2>&1 &
           sleep 2
           echo "DISPLAY=:99" >> $GITHUB_ENV
@@ -27,7 +36,6 @@ jobs:
       - name: Setup VNC password
         run: |
           mkdir -p ~/.vnc
-          # ساخت فایل رمز عبور با رمزی که کاربر وارد کرده
           x11vnc -storepasswd "${{ github.event.inputs.vnc_password }}" ~/.vnc/passwd
           chmod 600 ~/.vnc/passwd
 
@@ -44,18 +52,15 @@ jobs:
       - name: Launch Chromium in the virtual display
         run: |
           export DISPLAY=:99
-          # اجرای کروم در پس‌زمینه
           chromium-browser --no-sandbox --disable-gpu --disable-dev-shm-usage > /dev/null 2>&1 &
-          echo "Chromium launched in background"
           sleep 2
 
       - name: Start Cloudflare Quick Tunnel (6 hours)
         run: |
-          # اجرای تونل کلادفلر در پس‌زمینه و ذخیره لاگ آن در یک فایل
           cloudflared tunnel --url http://localhost:6080 --logfile cloudflared.log > /dev/null 2>&1 &
           sleep 15
           
-          # استخراج لینک عمومی از فایل لاگ
+          # استخراج لینک از لاگ
           URL=$(grep -o 'https://[^ ]*\.trycloudflare\.com' cloudflared.log | head -1)
           
           echo "=================================================="
@@ -66,5 +71,4 @@ jobs:
           echo "نکته: لینک بالا را در مرورگر باز کنید و رمز عبور را وارد کنید."
           echo "=================================================="
           
-          # نگه داشتن ورک‌فلو به مدت 6 ساعت (21600 ثانیه) زنده
           sleep 21600
