@@ -1,86 +1,99 @@
-name: Run Falkon with RealVNC via bore Tunnel
+name: Run Min with RealVNC via bore Tunnel
 
 on:
   workflow_dispatch:
     inputs:
       vnc_password:
-        description: 'رمز عبور برای VNC (حداقل 6 کاراکتر، حداکثر 8 کاراکتر)'
+        description: 'رمز عبور (دقیقا 8 کاراکتر انگلیسی)'
         required: true
-        default: 'MyPass12'
+        default: 'Test1234'
 
 jobs:
-  run-falkon-vnc:
+  run-min-vnc:
     runs-on: ubuntu-latest
-    timeout-minutes: 360   # ۶ ساعت
+    timeout-minutes: 360
     
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 1. کش کردن bore برای سرعت بیشتر (اختیاری)
-      - name: Cache bore
+      # 1. بازیابی کش bore
+      - name: Restore bore from cache
         id: cache-bore
         uses: actions/cache@v4
         with:
-          path: ~/bore
-          key: ${{ runner.os }}-bore-v0.5.0
+          path: $HOME/bore
+          key: linux-bore-v0.5.0-fixed
 
-      - name: Download bore if not cached
+      - name: Download bore if cache missed
         if: steps.cache-bore.outputs.cache-hit != 'true'
         run: |
-          mkdir -p ~/bore
-          wget -q https://github.com/ekzhang/bore/releases/download/v0.5.0/bore-v0.5.0-x86_64-unknown-linux-musl.tar.gz -O /tmp/bore.tar.gz
-          tar -xzf /tmp/bore.tar.gz -C ~/bore
-          chmod +x ~/bore/bore
+          mkdir -p $HOME/bore
+          cd $HOME/bore
+          wget -q https://github.com/ekzhang/bore/releases/download/v0.5.0/bore-v0.5.0-x86_64-unknown-linux-musl.tar.gz
+          tar -xzf bore-v0.5.0-x86_64-unknown-linux-musl.tar.gz
+          chmod +x bore
 
-      # 2. نصب وابستگی‌های سیستمی
-      - name: Install system dependencies
+      # 2. نصب وابستگی‌ها و دانلود مرورگر Min
+      - name: Install dependencies and download Min
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb x11vnc falkon
+          sudo apt-get install -y xvfb x11vnc wget
+          # دانلود آخرین نسخه Min (نسخه دبیان)
+          wget -q https://github.com/minbrowser/min/releases/latest/download/min_1.35.7_amd64.deb -O /tmp/min.deb
+          sudo dpkg -i /tmp/min.deb || sudo apt-get install -f -y
 
-      # 3. راه‌اندازی محیط گرافیکی
+      # 3. Xvfb با رزولوشن و عمق رنگ کمتر (ترافیک VNC کمتر)
       - name: Start Xvfb virtual display
         run: |
-          Xvfb :99 -screen 0 1280x1024x24 > /dev/null 2>&1 &
+          Xvfb :99 -screen 0 1024x768x16 > /dev/null 2>&1 &
           sleep 2
           echo "DISPLAY=:99" >> $GITHUB_ENV
 
       - name: Setup VNC password
         run: |
-          mkdir -p ~/.vnc
-          x11vnc -storepasswd "${{ github.event.inputs.vnc_password }}" ~/.vnc/passwd
-          chmod 600 ~/.vnc/passwd
+          mkdir -p $HOME/.vnc
+          x11vnc -storepasswd "${{ github.event.inputs.vnc_password }}" $HOME/.vnc/passwd
+          chmod 600 $HOME/.vnc/passwd
 
-      - name: Start x11vnc (listening on 0.0.0.0)
+      # 4. x11vnc با تنظیمات بهینه برای سرعت
+      - name: Start x11vnc with optimized settings
         run: |
-          # -listen 0.0.0.0 برای اینکه bore بتواند به آن وصل شود
-          x11vnc -display :99 -forever -shared -rfbauth ~/.vnc/passwd -rfbport 5900 -listen 0.0.0.0 -quiet > /dev/null 2>&1 &
-          sleep 2
-
-      # 4. اجرای مرورگر سبک Falkon
-      - name: Launch Falkon in the virtual display
-        run: |
-          export DISPLAY=:99
-          falkon --no-sandbox --disable-gpu --disable-dev-shm-usage > /dev/null 2>&1 &
+          x11vnc -display :99 \
+            -forever -shared \
+            -rfbauth $HOME/.vnc/passwd \
+            -rfbport 5900 \
+            -listen 0.0.0.0 \
+            -ncache 10 \
+            -ncache_cr \
+            -wait 15 \
+            -defer 15 \
+            -speeds lan \
+            -noxdamage \
+            -quiet > /dev/null 2>&1 &
           sleep 3
 
-      # 5. تونل TCP با bore و چاپ آدرس اتصال
-      - name: Start bore tunnel for VNC (6 hours)
+      # 5. اجرای Min
+      - name: Launch Min
         run: |
-          ~/bore/bore local 5900 --to bore.pub > bore.log 2>&1 &
+          export DISPLAY=:99
+          min --no-sandbox --disable-gpu > /dev/null 2>&1 &
+          sleep 3
+
+      # 6. تونل bore
+      - name: Start bore tunnel
+        run: |
+          $HOME/bore/bore local 5900 --to bore.pub > bore.log 2>&1 &
           sleep 5
           
-          # استخراج آدرس عمومی از لاگ bore (فرمت: bore.pub:xxxxx)
           ADDR=$(grep -oP 'bore\.pub:\d+' bore.log | head -1)
           
           echo "=================================================="
-          echo "🔗 آدرس اتصال برای RealVNC Viewer:"
-          echo "   Address: ${ADDR%:*}"
-          echo "   Port:    ${ADDR#*:}"
-          echo "🔒 رمز عبور: ${{ github.event.inputs.vnc_password }}"
+          echo "🔗 Address:  ${ADDR%:*}"
+          echo "🔢 Port:     ${ADDR#*:}"
+          echo "🔒 Password: ${{ github.event.inputs.vnc_password }}"
           echo "=================================================="
-          echo "👉 در RealVNC Viewer آدرس بالا را وارد کنید و رمز عبور را بزنید."
+          echo "👉 In RealVNC Viewer, enter: $ADDR"
           echo "=================================================="
           
           sleep 21600
