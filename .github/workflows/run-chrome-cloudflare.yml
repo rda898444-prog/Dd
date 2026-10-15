@@ -1,4 +1,4 @@
-name: Run Chrome with noVNC and Cloudflare Tunnel
+name: Run Falkon with noVNC and Cloudflare Tunnel
 
 on:
   workflow_dispatch:
@@ -9,7 +9,7 @@ on:
         default: 'MyPass12'
 
 jobs:
-  run-chrome:
+  run-falkon:
     runs-on: ubuntu-latest
     timeout-minutes: 360   # ۶ ساعت
     
@@ -17,16 +17,28 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install all dependencies
+      # 1. بخش کش کردن cloudflared (دقیقا مثل قبل)
+      - name: Cache cloudflared
+        id: cache-cloudflared
+        uses: actions/cache@v4
+        with:
+          path: ~/cloudflared
+          key: ${{ runner.os }}-cloudflared-latest
+
+      - name: Download cloudflared if not cached
+        if: steps.cache-cloudflared.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/cloudflared
+          wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O ~/cloudflared/cloudflared
+          chmod +x ~/cloudflared/cloudflared
+
+      # 2. نصب وابستگی‌ها (به جای chromium-browser از falkon استفاده می‌کنیم)
+      - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb x11vnc novnc websockify chromium-browser wget
-          # دانلود و نصب cloudflared به صورت دستی (چون بسته deb ممکنه وابستگی کم داشته باشه)
-          wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
-          chmod +x cloudflared-linux-amd64
-          sudo mv cloudflared-linux-amd64 /usr/local/bin/cloudflared
-          cloudflared --version
+          sudo apt-get install -y xvfb x11vnc novnc websockify falkon
 
+      # 3. راه‌اندازی محیط گرافیکی
       - name: Start Xvfb virtual display
         run: |
           Xvfb :99 -screen 0 1280x1024x24 > /dev/null 2>&1 &
@@ -49,26 +61,27 @@ jobs:
           websockify --web /usr/share/novnc 6080 localhost:5900 > /dev/null 2>&1 &
           sleep 2
 
-      - name: Launch Chromium in the virtual display
+      # 4. اجرای مرورگر سبک Falkon به جای کرومیوم
+      - name: Launch Falkon in the virtual display
         run: |
           export DISPLAY=:99
-          chromium-browser --no-sandbox --disable-gpu --disable-dev-shm-usage > /dev/null 2>&1 &
-          sleep 2
+          falkon --no-sandbox --disable-gpu --disable-dev-shm-usage > /dev/null 2>&1 &
+          sleep 3
 
+      # 5. تونل و چاپ لینک مستقیم
       - name: Start Cloudflare Quick Tunnel (6 hours)
         run: |
-          cloudflared tunnel --url http://localhost:6080 --logfile cloudflared.log > /dev/null 2>&1 &
+          ~/cloudflared/cloudflared tunnel --url http://localhost:6080 --logfile cloudflared.log > /dev/null 2>&1 &
           sleep 15
           
-          # استخراج لینک از لاگ
           URL=$(grep -o 'https://[^ ]*\.trycloudflare\.com' cloudflared.log | head -1)
           
           echo "=================================================="
-          echo "🌐 URL:      $URL"
-          echo "🔒 Password: ${{ github.event.inputs.vnc_password }}"
-          echo "⏱️  مدت اجرا: 6 ساعت"
+          echo "🌐 لینک اصلی:      $URL"
+          echo "🔒 رمز عبور:        ${{ github.event.inputs.vnc_password }}"
           echo "=================================================="
-          echo "نکته: لینک بالا را در مرورگر باز کنید و رمز عبور را وارد کنید."
+          echo "👉 لطفاً این لینک را باز کنید (دقت کنید که vnc_lite.html به آخر آن اضافه شده است):"
+          echo "$URL/vnc_lite.html"
           echo "=================================================="
           
           sleep 21600
